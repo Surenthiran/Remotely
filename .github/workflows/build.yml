@@ -1,175 +1,73 @@
-# IMPORTANT:
-# 1. The Server Runtime Identifier determines the target operating system
-# for which to build the server.  The default "linux-x64" will usually work
-# for most Linux-based operating systems.  You can see a full list at
-# https://docs.microsoft.com/en-us/dotnet/core/rid-catalog.
-
-# 2. You'll want to keep your fork updated so you can build the latest
-# changes.  On the GitHub page for your repo, you'll see a message that says,
-# "This branch is ## commits behind lucent-sea:master."
-#
-# Click the "Pull request" link next to it.
-#
-# On the next page click the "switching the base" link.  Now it's pulling from
-# my repo into yours.  Create and complete the pull request to update your repo.
-#
-# Once your branch has been updated, you can run this workflow again
-# to build the latest version.
-
 name: Build
 
 on:
   workflow_dispatch:
     inputs:
       rid:
-        description: 'Server Runtime Identifier'     
+        description: 'Server Runtime Identifier'
         required: false
-        default: "linux-x64"
+        default: "win-x64"
 
 jobs:
 
-  build-mac:
-  
-    runs-on: macos-10.15
-  
+  build-windows:
+
+    runs-on: windows-latest
+
+    env:
+      Solution_Name: Remotely.sln
+      Configuration: Release
+
     steps:
+      
       - name: Checkout
         uses: actions/checkout@v3.5.2
         with:
           submodules: recursive
+          fetch-depth: 0
 
       - name: Install .NET Core
         uses: actions/setup-dotnet@v3.0.3
         with:
           dotnet-version: 7
-        
-      - name: Setup NuGet.exe for use with actions
-        uses: NuGet/setup-nuget@v1.2.0
+
+      - name: Setup MSBuild.exe
+        uses: microsoft/setup-msbuild@v1
+
+      - name: Execute unit tests
+        run: dotnet test
+
+      - name: Restore the application
+        run: msbuild $env:Solution_Name /t:Restore /p:Configuration=$env:Configuration
 
       - name: Set current version
-        shell: pwsh
+        shell: powershell
         run: |
           $VersionString = git show -s --format=%ci
           $VersionDate = [DateTimeOffset]::Parse($VersionString)
-
           $CurrentVersion = $VersionDate.ToString("yyyy.MM.dd.HHmm")
-
           echo "CurrentVersion=$CurrentVersion" >> $env:GITHUB_ENV
-
           Write-Host "Setting current version to $CurrentVersion."
 
-      - name: Publish macOS x64 Agent
-        shell: pwsh
+      - name: Run Publish script
+        shell: powershell
         run: |
-          $VersionString = git show -s --format=%ci
-          $VersionDate = [DateTimeOffset]::Parse($VersionString)
+          .\Utilities\Publish.ps1 -CurrentVersion $env:CurrentVersion -RID ${{ github.event.inputs.rid }} -OutDir "$env:GITHUB_WORKSPACE\publish"
 
-          $CurrentVersion = $VersionDate.ToString("yyyy.MM.dd.HHmm")
-          
-          Write-Host "Publishing agent with version $CurrentVersion"
-          dotnet publish /p:Version=$CurrentVersion /p:FileVersion=$CurrentVersion --runtime osx-x64 --self-contained --configuration Release --output "./Agent/bin/publish/" "./Agent/"
-          Compress-Archive -Path "./Agent/bin/publish/*" -DestinationPath "./Agent/bin/Remotely-MacOS-x64.zip" -Force
-
-      - name: Upload build artifact
-        uses: actions/upload-artifact@v2
+      - name: Upload server build artifact
+        uses: actions/upload-artifact@v3.1.2
         with:
-          path: ./Agent/bin/Remotely-MacOS-x64.zip
-          name: Mac-Agent-x64
-     
-  build-windows:
+          path: ./publish/Server/
+          name: Server
 
-    runs-on: windows-latest  # For a list of available runner types, refer to
-                             # https://help.github.com/en/actions/reference/workflow-syntax-for-github-actions#jobsjob_idruns-on
-    needs: build-mac
+      - name: Publish Windows x64 Agent
+        shell: powershell
+        run: |
+          dotnet publish ./Agent/ -c Release -r win-x64 --self-contained -o "./Agent/bin/publish/"
+          Compress-Archive -Path "./Agent/bin/publish/*" -DestinationPath "./Agent/bin/Remotely-Windows-x64.zip" -Force
 
-    env:
-      Solution_Name: Remotely.sln      
-      Configuration: Release
-      PfxBase64: ${{ secrets.BASE64_ENCODED_PFX }}
-      PfxKey: ${{ secrets.PFX_KEY }}
-      ServerUrl: ${{ github.event.inputs.serverUrl }}
-
-    steps:
-       
-    - name: Checkout
-      uses: actions/checkout@v3.5.2
-      with:
-        # Comment out the below 'repository' line if you want to build from
-        # your fork instead of the author's.
-        repository: immense/Remotely
-        submodules: recursive
-        fetch-depth: 0
-        
-    # Install the .NET Core workload
-    - name: Install .NET Core
-      uses: actions/setup-dotnet@v3.0.3
-      with:
-        dotnet-version: 7
-      
-    # Add  MSBuild to the PATH: https://github.com/microsoft/setup-msbuild
-    - name: Setup MSBuild.exe
-      uses: microsoft/setup-msbuild@v1
-
-    # Execute all unit tests in the solution
-    - name: Execute unit tests
-      run: dotnet test
-
-    # Restore the application to populate the obj folder with RuntimeIdentifiers
-    - name: Restore the application
-      run: msbuild $env:Solution_Name /t:Restore /p:Configuration=$env:Configuration
-
-    # Decode the base 64 encoded pfx and save the Signing_Certificate
-    - name: Decode the pfx
-      run: |
-        if (!($env:PfxBase64)) {
-          echo "Skipping cert signing because Base64_Encoded_Pfx secret is missing."
-          return
-        }
-        
-        echo "Creating Pfx for signing assemblies."
-        
-        $pfx_cert_byte = [System.Convert]::FromBase64String($env:PfxBase64)
-        $certificatePath = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath GitHubActionsWorkflow.pfx
-        echo "Writing file to $certificatePath."
-        [IO.File]::WriteAllBytes($certificatePath, $pfx_cert_byte)
-    
-    # Store the assembly version in an environment variable
-    - name: Set current version
-      shell: powershell
-      run: |
-        $VersionString = git show -s --format=%ci
-        $VersionDate = [DateTimeOffset]::Parse($VersionString)
-        
-        $CurrentVersion = $VersionDate.ToString("yyyy.MM.dd.HHmm")
-        
-        echo "CurrentVersion=$CurrentVersion" >> $env:GITHUB_ENV
-
-        Write-Host "Setting current version to $CurrentVersion."
-        
-        
-    - name: Download macOS x64 Agent
-      uses: actions/download-artifact@v2.1.1
-      with:
-        name: Mac-Agent-x64
-        path: ./Server/wwwroot/Content/
-
-    # Run the Publish script to build clients and server.
-    - name: Run Publish script
-      shell: powershell
-      run: |
-        .\Utilities\Publish.ps1 -CertificatePath "$env:GITHUB_WORKSPACE\GitHubActionsWorkflow.pfx" -CertificatePassword $env:PfxKey -CurrentVersion $env:CurrentVersion -RID ${{ github.event.inputs.rid }} -OutDir "$env:GITHUB_WORKSPACE\publish"
-        
-    # Upload build artifact to be deployed from Ubuntu runner
-    - name: Upload build artifact
-      uses: actions/upload-artifact@v3.1.2
-      with:
-        path: ./publish/
-        name: Server
-    
-
-    # Remove the pfx
-    - name: Remove the pfx
-      run: |
-        if (Test-Path "$env:GITHUB_WORKSPACE\GitHubActionsWorkflow.pfx") {
-          Remove-Item -path "$env:GITHUB_WORKSPACE\GitHubActionsWorkflow.pfx"
-        }
+      - name: Upload Windows client build artifact
+        uses: actions/upload-artifact@v3.1.2
+        with:
+          path: ./Agent/bin/Remotely-Windows-x64.zip
+          name: Windows-Agent-x64
