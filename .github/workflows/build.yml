@@ -12,7 +12,7 @@ jobs:
 
   build-windows:
 
-    runs-on: windows-latest
+    runs-on: self-host
 
     env:
       Solution_Name: Remotely.sln
