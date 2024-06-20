@@ -19,7 +19,9 @@ jobs:
       Configuration: Release
 
     steps:
-      
+      - name: Install Git
+        run: |
+          choco install git --version 2.40.1 # Or specify the version you need
       - name: Checkout
         uses: actions/checkout@v3.5.2
         with:
