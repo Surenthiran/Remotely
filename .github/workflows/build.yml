@@ -57,17 +57,16 @@ jobs:
       - name: Upload server build artifact
         uses: actions/upload-artifact@v3.1.2
         with:
-          path: ./publish/Server/
+          path: ./publish/
           name: Server
 
-      - name: Publish Windows x64 Agent
+      - name: Build Windows Installer
         shell: powershell
         run: |
-          dotnet publish ./Agent/ -c Release -r win-x64 --self-contained -o "./Agent/bin/publish/"
-          Compress-Archive -Path "./Agent/bin/publish/*" -DestinationPath "./Agent/bin/Remotely-Windows-x64.zip" -Force
+          msbuild ./Agent.Installer.Win/Agent.Installer.Win.csproj /p:Configuration=Release
 
-      - name: Upload Windows client build artifact
+      - name: Upload Installer Artifact
         uses: actions/upload-artifact@v3.1.2
         with:
-          path: ./Agent/bin/Remotely-Windows-x64.zip
-          name: Windows-Agent-x64
+          path: ./Agent.Installer.Win/bin/Release/
+          name: Windows-Agent-Installer
